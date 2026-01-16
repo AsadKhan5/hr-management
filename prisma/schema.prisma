@@ -1,0 +1,46 @@
+// This is your Prisma schema file for HR Management System
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Employee {
+  id          String       @id @default(uuid())
+  firstName   String       @db.VarChar(100)
+  lastName    String       @db.VarChar(100)
+  email       String       @unique @db.VarChar(255)
+  phone       String?      @db.VarChar(20)
+  position    String       @db.VarChar(100)
+  department  String       @db.VarChar(100)
+  salary      Float?
+  hireDate    DateTime     @default(now())
+  status      String       @default("active") @db.VarChar(50) // active, inactive, terminated
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  attendance  Attendance[]
+
+  @@map("employees")
+}
+
+model Attendance {
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date       DateTime @default(now()) @db.Date
+  checkIn    DateTime?
+  checkOut   DateTime?
+  status     String   @db.VarChar(50) // present, absent, late, half-day, on-leave
+  notes      String?  @db.Text
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("attendance")
+  @@index([employeeId])
+  @@index([date])
+}
