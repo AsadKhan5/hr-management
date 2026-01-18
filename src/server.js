@@ -17,8 +17,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Routes
-app.use('/api/employees', employeeRoutes);
-app.use('/api/attendance', attendanceRoutes);
+app.use('/employees', employeeRoutes);
+app.use('/attendance', attendanceRoutes);
+app.get('/dashboard', require('./controllers/attendance.controller').getDashboard);
 
 // test
 app.get('/test', (req, res) => {

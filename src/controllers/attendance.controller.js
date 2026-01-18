@@ -1,16 +1,26 @@
 const db = require('../db');
 
 const markAttendance = async (req, res) => {
-  const { employee_id, status, check_in, check_out } = req.body;
+  const { empId, date, status } = req.body;
   
-  if (!employee_id || !status) {
-    return res.status(400).json({ error: 'employee_id and status required' });
+  if (!empId || !status) {
+    return res.status(400).json({ error: 'empId and status required' });
+  }
+
+  if (status !== 'Present' && status !== 'Absent') {
+    return res.status(400).json({ error: 'status must be Present or Absent' });
   }
 
   try {
+    const employee = await db.query('SELECT empid FROM employees WHERE empid = $1', [empId]);
+    
+    if (employee.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+    
     const attendance = await db.query(
-      'INSERT INTO attendance (employee_id, status, check_in, check_out) VALUES ($1, $2, $3, $4) RETURNING *',
-      [employee_id, status, check_in || null, check_out || null]
+      'INSERT INTO attendance (empId, date, status) VALUES ($1, $2, $3) RETURNING *',
+      [empId, date || new Date().toISOString().split('T')[0], status]
     );
     res.status(201).json(attendance.rows[0]);
   } catch (err) {
@@ -19,17 +29,18 @@ const markAttendance = async (req, res) => {
 };
 
 const getAttendance = async (req, res) => {
-  const { employeeId } = req.params;
+  const { empId } = req.params;
   const { date } = req.query;
 
   try {
     let query = `
-      SELECT a.*, e.full_name, e.email, e.department 
+      SELECT a.id, a.empid, a.date, a.status, a.created_at, 
+             e.full_name, e.email, e.department, e.empid
       FROM attendance a 
-      JOIN employees e ON a.employee_id = e.id 
-      WHERE a.employee_id = $1
+      JOIN employees e ON a.empid = e.empid 
+      WHERE e.empid = $1
     `;
-    const params = [employeeId];
+    const params = [empId];
 
     if (date) {
       query += ' AND a.date = $2';
@@ -45,23 +56,60 @@ const getAttendance = async (req, res) => {
   }
 };
 
-const getAttendanceByDate = async (req, res) => {
-  const { date } = req.query;
-
-  if (!date) {
-    return res.status(400).json({ error: 'date parameter required' });
-  }
+const getEmployeeStats = async (req, res) => {
+  const { empId } = req.params;
 
   try {
-    const records = await db.query(
-      `SELECT a.*, e.full_name, e.email, e.department 
-       FROM attendance a 
-       JOIN employees e ON a.employee_id = e.id 
-       WHERE a.date = $1 
-       ORDER BY a.created_at DESC`,
-      [date]
+    const stats = await db.query(
+      `SELECT 
+         e.id, e.full_name, e.email, e.department, e.empid,
+         COUNT(CASE WHEN a.status = 'Present' THEN 1 END) as total_present,
+         COUNT(CASE WHEN a.status = 'Absent' THEN 1 END) as total_absent,
+         COUNT(a.id) as total_days
+       FROM employees e
+       LEFT JOIN attendance a ON e.empid = a.empid
+       WHERE e.empid = $1
+       GROUP BY e.id`,
+      [empId]
     );
-    res.json(records.rows);
+    
+    if (stats.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+    
+    res.json(stats.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+const getDashboard = async (req, res) => {
+  try {
+    const summary = await db.query(`
+      SELECT 
+        COUNT(DISTINCT e.id) as total_employees,
+        COUNT(CASE WHEN a.status = 'Present' AND a.date = CURRENT_DATE THEN 1 END) as present_today,
+        COUNT(CASE WHEN a.status = 'Absent' AND a.date = CURRENT_DATE THEN 1 END) as absent_today
+      FROM employees e
+      LEFT JOIN attendance a ON e.empid = a.empid
+    `);
+
+    const employeeList = await db.query(`
+      SELECT 
+        e.id, e.full_name, e.email, e.department, e.empid,
+        COUNT(CASE WHEN a.status = 'Present' THEN 1 END) as total_present,
+        COUNT(CASE WHEN a.status = 'Absent' THEN 1 END) as total_absent,
+        MAX(a.date) as last_attendance_date
+      FROM employees e
+      LEFT JOIN attendance a ON e.empid = a.empid
+      GROUP BY e.id
+      ORDER BY e.created_at DESC
+    `);
+
+    res.json({
+      summary: summary.rows[0],
+      employees: employeeList.rows
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -70,5 +118,6 @@ const getAttendanceByDate = async (req, res) => {
 module.exports = {
   markAttendance,
   getAttendance,
-  getAttendanceByDate
+  getEmployeeStats,
+  getDashboard
 };

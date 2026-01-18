@@ -12,17 +12,12 @@ datasource db {
 
 model Employee {
   id          String       @id @default(uuid())
-  firstName   String       @db.VarChar(100)
-  lastName    String       @db.VarChar(100)
+  fullName    String       @map("full_name") @db.VarChar(100)
   email       String       @unique @db.VarChar(255)
-  phone       String?      @db.VarChar(20)
-  position    String       @db.VarChar(100)
   department  String       @db.VarChar(100)
-  salary      Float?
-  hireDate    DateTime     @default(now())
-  status      String       @default("active") @db.VarChar(50) // active, inactive, terminated
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  empId       String       @unique @map("empid") @db.VarChar(50)
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
   attendance  Attendance[]
 
   @@map("employees")
@@ -30,17 +25,14 @@ model Employee {
 
 model Attendance {
   id         String   @id @default(uuid())
-  employeeId String
-  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  empId      String   @map("empid")
+  employee   Employee @relation(fields: [empId], references: [empId], onDelete: Cascade)
   date       DateTime @default(now()) @db.Date
-  checkIn    DateTime?
-  checkOut   DateTime?
-  status     String   @db.VarChar(50) // present, absent, late, half-day, on-leave
-  notes      String?  @db.Text
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  status     String   @db.VarChar(50) // Present, Absent
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
 
   @@map("attendance")
-  @@index([employeeId])
+  @@index([empId])
   @@index([date])
 }
