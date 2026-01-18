@@ -35,9 +35,14 @@ const addEmployee = async (req, res) => {
   }
 
   try {
-    const countResult = await db.query('SELECT COUNT(*) FROM employees');
-    const count = parseInt(countResult.rows[0].count);
-    const newEmpId = 'emp' + String(count + 1);
+    // Get the highest empId number and increment it
+    const lastEmp = await db.query("SELECT empId FROM employees ORDER BY id DESC LIMIT 1");
+    let newEmpId = 'emp1';
+    if (lastEmp.rows.length > 0) {
+      const lastEmpId = lastEmp.rows[0].empid;
+      const num = parseInt(lastEmpId.replace('emp', ''));
+      newEmpId = 'emp' + (isNaN(num) ? 1 : num + 1);
+    }
     
     const newEmployee = await db.query(
       'INSERT INTO employees (full_name, email, department, empId) VALUES ($1, $2, $3, $4) RETURNING *',
