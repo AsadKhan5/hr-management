@@ -6,7 +6,10 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 generator client {
-  provider      = "prisma-client-js"
+  provider = "prisma-client-js"
+  output   = "./generated" // Or any custom path
+  // Use "client" engineType to avoid shipping Rust binaries (requires a driver adapter)
+  // engineType = "client"
   binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
