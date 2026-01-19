@@ -10,7 +10,6 @@ const markAttendance = async (req, res) => {
   if (status !== 'Present' && status !== 'Absent') {
     return res.status(400).json({ error: 'status must be Present or Absent' });
   }
-
   try {
     const employee = await prisma.employees.findUnique({ where: { empId: empId } });
     if (!employee) {
@@ -25,6 +24,7 @@ const markAttendance = async (req, res) => {
     });
     res.status(201).json(attendance);
   } catch (err) {
+    console.log(err);
     res.status(500).json({ error: err.message });
   }
 };
