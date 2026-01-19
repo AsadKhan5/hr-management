@@ -1,4 +1,4 @@
-const db = require('../db');
+const prisma = require('../db/prismaClient');
 
 const markAttendance = async (req, res) => {
   const { empId, date, status } = req.body;
@@ -12,17 +12,18 @@ const markAttendance = async (req, res) => {
   }
 
   try {
-    const employee = await db.query('SELECT empid FROM employees WHERE empid = $1', [empId]);
-    
-    if (employee.rows.length === 0) {
+    const employee = await prisma.employees.findUnique({ where: { empId: empId } });
+    if (!employee) {
       return res.status(404).json({ error: 'Employee not found' });
     }
-    
-    const attendance = await db.query(
-      'INSERT INTO attendance (empId, date, status) VALUES ($1, $2, $3) RETURNING *',
-      [empId, date || new Date().toISOString().split('T')[0], status]
-    );
-    res.status(201).json(attendance.rows[0]);
+    const attendance = await prisma.attendance.create({
+      data: {
+        empId,
+        date: date ? new Date(date) : new Date(),
+        status
+      }
+    });
+    res.status(201).json(attendance);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -33,24 +34,36 @@ const getAttendance = async (req, res) => {
   const { date } = req.query;
 
   try {
-    let query = `
-      SELECT a.id, a.empid, a.date, a.status, a.created_at, 
-             e.full_name, e.email, e.department, e.empid
-      FROM attendance a 
-      JOIN employees e ON a.empid = e.empid 
-      WHERE e.empid = $1
-    `;
-    const params = [empId];
-
-    if (date) {
-      query += ' AND a.date = $2';
-      params.push(date);
-    }
-
-    query += ' ORDER BY a.date DESC';
-
-    const records = await db.query(query, params);
-    res.json(records.rows);
+    const where = {
+      empId,
+      ...(date ? { date: new Date(date) } : {})
+    };
+    const records = await prisma.attendance.findMany({
+      where,
+      orderBy: { date: 'desc' },
+      include: {
+        employee: {
+          select: {
+            full_name: true,
+            email: true,
+            department: true,
+            empId: true
+          }
+        }
+      }
+    });
+    // Flatten employee info into each record for compatibility
+    const result = records.map(r => ({
+      id: r.id,
+      empid: r.empId,
+      date: r.date,
+      status: r.status,
+      created_at: r.created_at,
+      full_name: r.employee?.full_name,
+      email: r.employee?.email,
+      department: r.employee?.department
+    }));
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -60,24 +73,26 @@ const getEmployeeStats = async (req, res) => {
   const { empId } = req.params;
 
   try {
-    const stats = await db.query(
-      `SELECT 
-         e.id, e.full_name, e.email, e.department, e.empid,
-         COUNT(CASE WHEN a.status = 'Present' THEN 1 END) as total_present,
-         COUNT(CASE WHEN a.status = 'Absent' THEN 1 END) as total_absent,
-         COUNT(a.id) as total_days
-       FROM employees e
-       LEFT JOIN attendance a ON e.empid = a.empid
-       WHERE e.empid = $1
-       GROUP BY e.id`,
-      [empId]
-    );
-    
-    if (stats.rows.length === 0) {
+    const employee = await prisma.employees.findUnique({
+      where: { empId },
+      include: { attendance: true }
+    });
+    if (!employee) {
       return res.status(404).json({ error: 'Employee not found' });
     }
-    
-    res.json(stats.rows[0]);
+    const total_present = employee.attendance.filter(a => a.status === 'Present').length;
+    const total_absent = employee.attendance.filter(a => a.status === 'Absent').length;
+    const total_days = employee.attendance.length;
+    res.json({
+      id: employee.id,
+      full_name: employee.full_name,
+      email: employee.email,
+      department: employee.department,
+      empid: employee.empId,
+      total_present,
+      total_absent,
+      total_days
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -85,30 +100,36 @@ const getEmployeeStats = async (req, res) => {
 
 const getDashboard = async (req, res) => {
   try {
-    const summary = await db.query(`
-      SELECT 
-        COUNT(DISTINCT e.id) as total_employees,
-        COUNT(CASE WHEN a.status = 'Present' AND a.date = CURRENT_DATE THEN 1 END) as present_today,
-        COUNT(CASE WHEN a.status = 'Absent' AND a.date = CURRENT_DATE THEN 1 END) as absent_today
-      FROM employees e
-      LEFT JOIN attendance a ON e.empid = a.empid
-    `);
+    // Summary
+    const [total_employees, present_today, absent_today] = await Promise.all([
+      prisma.employees.count(),
+      prisma.attendance.count({ where: { status: 'Present', date: { equals: new Date(new Date().toISOString().split('T')[0]) } } }),
+      prisma.attendance.count({ where: { status: 'Absent', date: { equals: new Date(new Date().toISOString().split('T')[0]) } } })
+    ]);
 
-    const employeeList = await db.query(`
-      SELECT 
-        e.id, e.full_name, e.email, e.department, e.empid,
-        COUNT(CASE WHEN a.status = 'Present' THEN 1 END) as total_present,
-        COUNT(CASE WHEN a.status = 'Absent' THEN 1 END) as total_absent,
-        MAX(a.date) as last_attendance_date
-      FROM employees e
-      LEFT JOIN attendance a ON e.empid = a.empid
-      GROUP BY e.id
-      ORDER BY e.created_at DESC
-    `);
-
+    // Employee List
+    const employees = await prisma.employees.findMany({
+      orderBy: { created_at: 'desc' },
+      include: { attendance: true }
+    });
+    const employeeList = employees.map(e => {
+      const total_present = e.attendance.filter(a => a.status === 'Present').length;
+      const total_absent = e.attendance.filter(a => a.status === 'Absent').length;
+      const last_attendance_date = e.attendance.length > 0 ? e.attendance.reduce((max, a) => a.date > max ? a.date : max, e.attendance[0].date) : null;
+      return {
+        id: e.id,
+        full_name: e.full_name,
+        email: e.email,
+        department: e.department,
+        empid: e.empId,
+        total_present,
+        total_absent,
+        last_attendance_date
+      };
+    });
     res.json({
-      summary: summary.rows[0],
-      employees: employeeList.rows
+      summary: { total_employees, present_today, absent_today },
+      employees: employeeList
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
